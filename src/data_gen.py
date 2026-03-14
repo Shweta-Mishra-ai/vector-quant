@@ -31,3 +31,4 @@ def generate_market_data(n_assets: int = 10, n_years: int = 5, seed: int = 42) -
 if __name__ == "__main__":
     generate_market_data()
 
+
