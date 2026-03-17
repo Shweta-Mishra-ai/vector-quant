@@ -55,19 +55,72 @@ class VectorQuantEngine:
             "sharpe_ratio": sharpe_ratio * np.sqrt(252)
         }
 
-if __name__ == "__main__":
+    def calculate_risk_metrics(self, returns: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        PHASE 3: LINEAR ALGEBRA
+        Task: Calculate Covariance and Correlation matrices to see how assets move together.
+        """
+        # np.cov expects assets as rows, observations as columns. So we transpose (.T)
+        cov_matrix = np.cov(returns.T)
+        
+        # Correlation matrix scales covariance between -1 and 1
+        corr_matrix = np.corrcoef(returns.T)
+        
+        return cov_matrix, corr_matrix
+
+    def monte_carlo_var(self, returns: np.ndarray, initial_value: float = 100000.0, days: int = 252, simulations: int = 10000) -> float:
+        """
+        PHASE 3: PROBABILITY & SIMULATION
+        Task: Simulate 10,000 future portfolio paths to find the 95% Value at Risk (VaR).
+        """
+        num_assets = returns.shape[1]
+        mu = np.mean(returns, axis=0)
+        cov_matrix = np.cov(returns.T)
+        
+        # 1. Cholesky Decomposition (The Senior Data Scientist Secret)
+        # We need correlated random numbers. L @ L.T = Covariance Matrix
+        L = np.linalg.cholesky(cov_matrix)
+        
+        # 2. Generate pure random noise: Shape (10000 sims, 252 days, 10 assets)
+        Z = np.random.normal(0, 1, size=(simulations, days, num_assets))
+        
+        # 3. Tensor Multiplication (Advanced NumPy)
+        # Apply the correlation matrix (L) to our random noise (Z) using Einstein Summation
+        daily_shocks = np.einsum('ij, stj -> sti', L, Z)
+        
+        # 4. Add the historical mean (drift)
+        simulated_returns = mu + daily_shocks
+        
+        # 5. Calculate cumulative portfolio value paths (assuming equal weights)
+        weights = np.ones(num_assets) / num_assets
+        port_sim_returns = np.sum(simulated_returns * weights, axis=-1)
+        
+        # Exponential cumulative sum to simulate compounding growth
+        cumulative_returns = np.exp(np.cumsum(port_sim_returns, axis=1))
+        final_values = initial_value * cumulative_returns[:, -1]
+        
+        # 6. Calculate 95% Value at Risk (VaR)
+        # What is the worst-case loss in the bottom 5% of our 10,000 alternate realities?
+        var_95 = initial_value - np.percentile(final_values, 5)
+        
+        return var_95
+    if __name__ == "__main__":
+    # --- PHASE 1 & 2 ---
     engine = VectorQuantEngine("data/market_prices.npy")
-    
     clean_prices = engine.clean_data()
-    print(f"Data Cleaned. Any NaNs left? {np.isnan(clean_prices).any()}")
-    
     returns = engine.calculate_returns(clean_prices)
-    print(f"Daily Returns Calculated. Shape: {returns.shape}")
     
-    sma, vol = engine.get_rolling_stats(clean_prices, window=30)
-    print(f"Rolling SMA generated. Shape: {sma.shape}")
+    # --- PHASE 3 ---
+    print("\n--- Phase 3: Risk & Simulation ---")
+    cov, corr = engine.calculate_risk_metrics(returns)
+    print(f"Covariance Matrix Shape: {cov.shape}")
     
-    metrics = engine.portfolio_simulation(returns)
-    print("\n--- Portfolio Report ---")
-    print(f"Projected Annual Sharpe Ratio: {metrics['sharpe_ratio']:.4f}")
+    # Run Monte Carlo Simulation
+    print("Running 10,000 Monte Carlo Simulations... (Watch how fast NumPy does this)")
+    var_95 = engine.monte_carlo_var(returns, initial_value=100000.0)
+    
+    print("\n--- Risk Report ---")
+    print(f"Initial Portfolio Value: $100,000")
+    print(f"95% Value at Risk (1 Year): ${var_95:,.2f}")
+    print("Interpretation: We are 95% confident our portfolio will NOT lose more than this amount in the next year.")
 
